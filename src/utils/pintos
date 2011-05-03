@@ -1,6 +1,6 @@
-#! /usr/bin/perl
+#! /usr/bin/perl -w
 
-#use strict;
+use strict;
 use POSIX;
 use Fcntl;
 use File::Temp 'tempfile';
@@ -40,27 +40,17 @@ run_vm ();
 finish_scratch_disk ();
 
 exit 0;
-
+
 # Parses the command line.
 sub parse_command_line {
     usage (0) if @ARGV == 0 || (@ARGV == 1 && $ARGV[0] eq '--help');
 
     @kernel_args = @ARGV;
-    print ("ARGV:@ARGV\n");
-    if (grep ('--', @kernel_args)) {
-        print ("options are present, now parsing them\n");
-
+    if (grep ($_ eq '--', @kernel_args)) {
 	@ARGV = ();
-
-        my $arg = shift (@kernel_args);
-	while ($arg =~ /^--\w+/) {
+	while ((my $arg = shift (@kernel_args)) ne '--') {
 	    push (@ARGV, $arg);
-            $arg = shift (@kernel_args);
 	}
-        unshift (@kernel_args, $arg);
-
-        print ("options:@ARGV\nkernel_arguments: @kernel_args\n");
-
 	GetOptions ("sim=s" => sub { set_sim ($_[1]) },
 		    "bochs" => sub { set_sim ("bochs") },
 		    "qemu" => sub { set_sim ("qemu") },
@@ -110,11 +100,9 @@ sub parse_command_line {
 	  or exit 1;
     }
 
-    $sim = "qemu" if !defined $sim;
+    $sim = "bochs" if !defined $sim;
     $debug = "none" if !defined $debug;
     $vga = exists ($ENV{DISPLAY}) ? "window" : "none" if !defined $vga;
-
-    print ("sim:$sim debug:$debug vga:$vga\n");
 
     undef $timeout, print "warning: disabling timeout with --$debug\n"
       if defined ($timeout) && $debug ne 'none';
@@ -191,7 +179,6 @@ sub set_sim {
     my ($new_sim) = @_;
     die "--$new_sim conflicts with --$sim\n"
 	if defined ($sim) && $sim ne $new_sim;
-    print ("set_sim (): sim=$sim new_sim=$new_sim\n");
     $sim = $new_sim;
 }
 
@@ -252,8 +239,6 @@ sub set_disk {
 
     push (@disks, $disk);
 
-    print ("setting $disk as a disk to be included in the VM to run\n");
-
     my (%pt) = read_partition_table ($disk);
     for my $role (keys %pt) {
 	die "can't have two sources for \L$role\E partition"
@@ -267,12 +252,9 @@ sub set_disk {
 # Locates the files used to back each of the virtual disks,
 # and creates temporary disks.
 sub find_disks {
-    print ("find_disks ()\n");
     # Find kernel, if we don't already have one.
     if (!exists $parts{KERNEL}) {
-        print ("kernel partition doesnot exists\n");
 	my $name = find_file ('kernel.bin');
-        print ("find_disk:: name: $name\n");
 	die "Cannot find kernel\n" if !defined $name;
 	do_set_part ('KERNEL', 'file', $name);
     }
@@ -280,23 +262,16 @@ sub find_disks {
     # Try to find file system and swap disks, if we don't already have
     # partitions.
     if (!exists $parts{FILESYS}) {
-        print  ("filesys doesnot exist\n");
 	my $name = find_file ('filesys.dsk');
 	set_disk ($name) if defined $name;
-        print ("filesys.dsk not found\n") if !defined $name;
     }
     if (!exists $parts{SWAP}) {
-        print ("swap disks not found\n");
 	my $name = find_file ('swap.dsk');
 	set_disk ($name) if defined $name;
-        print ("swap.disk not found\n") if !defined $name;
     }
 
-    my ($curr_path) = `pwd`;
-    print ("path of the kernel:$curr_path\n");
     # Warn about (potentially) missing partitions.
     if (my ($project) = `pwd` =~ /\b(threads|userprog|vm|filesys)\b/) {
-        print ("project:$project\n");
 	if ((grep ($project eq $_, qw (userprog vm filesys)))
 	    && !defined $parts{FILESYS}) {
 	    print STDERR "warning: it looks like you're running the $project ";
@@ -313,7 +288,6 @@ sub find_disks {
     if (!defined $make_disk) {
 	($handle, $make_disk) = tempfile (UNLINK => $tmp_disk,
 					  SUFFIX => '.dsk');
-        print ("handle:$handle make_disk:$make_disk\n");
     } else {
 	die "$make_disk: already exists\n" if -e $make_disk;
 	open ($handle, '>', $make_disk) or die "$make_disk: create: $!\n";
@@ -323,29 +297,19 @@ sub find_disks {
     my (@args);
     push (@args, shift (@kernel_args))
       while @kernel_args && $kernel_args[0] =~ /^-/;
-
     push (@args, 'extract') if @puts;
     push (@args, @kernel_args);
     push (@args, 'append', $_->[0]) foreach @gets;
 
-    print ("kernel_args:@kernel_args args:@args puts:@puts gets:@gets\n");
     # Make disk.
     my (%disk);
     our (@role_order);
-    print ("role_order:@role_order\n");
     for my $role (@role_order) {
 	my $p = $parts{$role};
-        print ("role:p::$role:$p\n");
 	next if !defined $p;
 	next if exists $p->{DISK};
 	$disk{$role} = $p;
     }
-
-    my @g_keys = keys (%geometry);
-    my @g_values = values (%geometry);
-    print ("disk:$make_disk disk_aligning:$align disk_geometry:{@g_keys}=>{@g_values}
-            Format:partitioned args:@args\n");
-
     $disk{DISK} = $make_disk;
     $disk{HANDLE} = $handle;
     $disk{ALIGN} = $align;
@@ -362,15 +326,12 @@ sub find_disks {
 
 # Prepare the scratch disk for gets and puts.
 sub prepare_scratch_disk {
-    print ("prepare_scratch_disk\n");
     return if !@gets && !@puts;
 
     my ($p) = $parts{SCRATCH};
     # Create temporary partition and write the files to put to it,
     # then write an end-of-archive marker.
     my ($part_handle, $part_fn) = tempfile (UNLINK => 1, SUFFIX => '.part');
-    print ("part_handle:$part_handle part_fn:$part_fn\n");
-
     put_scratch_file ($_->[0], defined $_->[1] ? $_->[1] : $_->[0],
 		      $part_handle, $part_fn)
       foreach @puts;
@@ -627,8 +588,6 @@ EOF
     unshift (@cmd, $squish_pty) if defined $squish_pty;
     push (@cmd, '-j', $jitter) if defined $jitter;
 
-    print ("cmd: @cmd\n");
-
     # Run Bochs.
     print join (' ', @cmd), "\n";
     my ($exit) = xsystem (@cmd);
@@ -660,7 +619,7 @@ sub run_qemu {
     print "warning: qemu doesn't support jitter\n"
       if defined $jitter;
     my (@cmd) = ('qemu');
-    #push (@cmd, '-no-kqemu');
+    push (@cmd, '-no-kqemu');
     push (@cmd, '-hda', $disks[0]) if defined $disks[0];
     push (@cmd, '-hdb', $disks[1]) if defined $disks[1];
     push (@cmd, '-hdc', $disks[2]) if defined $disks[2];
