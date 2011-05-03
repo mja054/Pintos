@@ -63,7 +63,9 @@ sub set_part {
 sub do_set_part {
     my ($role, $source, $arg) = @_;
 
+    print ("do_set_part:: parts{role}:$parts{$role}\n");
     my ($p) = $parts{$role} = {};
+    print ("do_set_part:: parts{role}:$parts{$role}\n");
     if ($source eq 'file') {
 	if (read_mbr ($arg)) {
 	    print STDERR "warning: $arg looks like a partitioned disk ";
@@ -73,6 +75,7 @@ sub do_set_part {
 	$p->{FILE} = $arg;
 	$p->{OFFSET} = 0;
 	$p->{BYTES} = -s $arg;
+        print ("file:$arg offset:$p->{OFFSET} size:$p->{BYTES}\n");
     } elsif ($source eq 'from') {
 	my (%pt) = read_partition_table ($arg);
 	my ($sp) = $pt{$role};
@@ -149,6 +152,9 @@ sub assemble_disk {
     my (%args) = @_;
 
     my (%geometry) = $args{GEOMETRY} || (H => 16, S => 63);
+    my @g_keys = keys (%geometry);
+    my @g_values = values (%geometry);
+    print ("assemble_disk:: geometry:{@g_keys}=>{@g_values}\n");
 
     my ($align);	# Align partition start, end to cylinder boundary?
     my ($pad);		# Pad end of disk out to cylinder boundary?
@@ -364,6 +370,7 @@ sub read_loader {
 
     my ($handle);
     open ($handle, '<', $name) or die "$name: open: $!\n";
+    print ("LOADER_SIZE:$LOADER_SIZE\n");
     -s $handle == $LOADER_SIZE || -s $handle == 512
       or die "$name: must be exactly $LOADER_SIZE or 512 bytes long\n";
     $loader = read_fully ($handle, $name, $LOADER_SIZE);
@@ -414,6 +421,7 @@ sub lba_to_chs {
 # successful, otherwise numeric 0.
 sub read_mbr {
     my ($file) = @_;
+    print ("reading the MBR of $file\n");
     my ($retval) = 0;
     open (FILE, '<', $file) or die "$file: open: $!\n";
     if (-s FILE == 0) {
@@ -422,6 +430,7 @@ sub read_mbr {
 	my ($mbr);
 	sysread (FILE, $mbr, 512) == 512 or die "$file: read: $!\n";
 	$retval = $mbr if unpack ("v", substr ($mbr, 510)) == 0xaa55;
+        print ("MBR of $file is $retval\n");
     }
     close (FILE);
     return $retval;
@@ -438,6 +447,9 @@ sub interpret_partition_table {
 	my ($bootable, $valid, $type, $lba_start, $lba_length)
 	  = unpack ("C X V C x3 V V", substr ($mbr, 446 + 16 * $i, 16));
 	next if !$valid;
+
+        print ("bootable:$bootable, valid:$valid, type:$type,
+                lba_start:$lba_start, lba_length:$lba_length");
 
 	(print STDERR "warning: invalid partition entry $i in $disk\n"),
 	  next if $bootable != 0 && $bootable != 0x80;
